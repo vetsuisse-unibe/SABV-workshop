@@ -1,0 +1,553 @@
+#' ---
+#' title: "Hands-on Exercise: GTEx Multi-Tissue Sex Interaction (Full Imbalanced Set)"
+#' subtitle: "EU-SABV Workshop"
+#' author: "Vidhya Jagannathan, University of Bern, Switzerland"
+#' format:
+#'   html:
+#'     toc: true
+#'     toc-depth: 3
+#'     toc-location: left
+#'     number-sections: true
+#'     code-fold: false
+#'     code-tools: true
+#'     theme: cosmo
+#'     css: styles.css
+#' execute:
+#'   echo: true
+#'   warning: true
+#'   message: true
+#'   error: true
+#'   eval: true
+#' ---
+#' 
+#' > Hands-on tutorial using GTEx v8 multi-tissue data to test whether sex-biased expression is tissue-specific.
+#' 
+#' ::: {.callout-note}
+#' ## Where the data comes from
+#' 
+#' This tutorial uses a **prepared GTEx v8** dataset — `workshop_gtex_multitissue.RData` in `hands_on_datasets/` — so the practical needs no large download. Loading it gives three objects:
+#' 
+#' - `counts_paired` — gene read counts (genes × samples, integer)
+#' - `meta_paired` — one row per sample (`SAMPID`, `SUBJID`, `sex`, `tissue`, `age_decade`)
+#' - `genes_paired` — gene id ↔ gene name
+#' 
+#' It was prepared from the public GTEx v8 files (`storage.googleapis.com/adult-gtex/…/v8/…`) — the same source **exercise 01** downloads — by keeping donors with *both* skeletal muscle and liver (paired design) and restricting to expressed genes. Here we just `load()` the file and — unlike the balanced companion tutorial — keep the **full, sex-imbalanced set** so we can demonstrate the imbalance artifact directly.
+#' 
+#' **Version note.** Sample counts are release-specific. In v8 the full paired muscle+liver set is **145 M / 61 F** donors (412 samples). A newer release such as **v11** has more donors, so these counts (and the male:female ratio) shift — the model and conclusions are unchanged, but pin to **v8** to reproduce the exact numbers here. The `sessionInfo()` printed at the end records the package versions used, so any downstream differences are easy to trace.
+#' :::
+#' 
+#' # Overview
+#' 
+#' **GTEx multi-tissue interaction exercise**
+#' 
+#' This tutorial asks a central SABV question:
+#' 
+#' > Are sex-biased expression patterns the same in every tissue, or are they tissue-specific?
+#' 
+#' We use paired GTEx donors who have both **skeletal muscle** and **liver** RNA-seq samples. Because each donor contributes two tissues, we can block on donor and test whether the liver-vs-muscle tissue effect differs between males and females.
+#' 
+#' The key model is:
+#' 
+#' ```r
+#' design = ~ subject_id + tissue + liver_female
+#' ```
+#' 
+#' Here, `subject_id` blocks donor-to-donor baseline differences. The `liver_female` indicator is the interaction term: it is 1 for female liver samples and 0 otherwise. It tests whether the liver-vs-muscle tissue effect differs in females compared with males. We fit it with **limma-voom**, which handles the ~208-column donor-blocked design in seconds.
+#' 
+#' Main analyses include:
+#' 
+#' - selecting paired donors with two tissues,
+#' - using the full, sex-imbalanced set (with a balanced down-sampled control in Section 10),
+#' - filtering to informative genes,
+#' - PCA colored by tissue and sex,
+#' - fitting a paired sex × tissue interaction model,
+#' - visualizing genes with tissue-specific sex effects,
+#' - demonstrating how imbalance inflates the larger sex's apparent responsiveness.
+#' 
+#' ::: {.callout-note}
+#' ## Primary literature & the experimental-unit principle
+#' 
+#' - **Reynolds (2024)**, *A Guide to Sample Size for Animal-based Studies*, Ch. 2 — the **experimental unit** and **repeated-measures** designs.
+#' - **Feuvrier, Bohacek & Germain (2026, draft)** — Venn-overlap fallacy, single comprehensive model, no-intercept contrasts, double-dipping.
+#' 
+#' **This is a paired (repeated-measures) design.** Each donor contributes *two* tissue samples, so the muscle and liver samples from one person are **not independent** — they correspond to Reynolds's Figure 2.1c (the experimental unit is the **donor**, with repeated observations). Treating the two samples per donor as independent (doubling the apparent N) would be **pseudo-replication**. Blocking on `subject_id` is precisely how the design respects the experimental unit: it removes donor-to-donor baseline differences (and, because each donor has a fixed sex, the sex main effect) so the model can isolate the *within-donor* tissue effect and how it differs by sex.
+#' :::
+#' 
+#' # 0. Install/Load Packages
+#' 
+## -----------------------------------------------------------------------------
+#| message: false
+#| warning: false
+required_pkgs <- c("data.table", "dplyr", "tidyr", "readr", "ggplot2", "ggrepel", "pheatmap", "ggVennDiagram", "RColorBrewer", "BiocManager")
+for (pkg in required_pkgs) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  }
+}
+# limma-voom + edgeR: fast donor-blocked DE. The full imbalanced set has 206 donors,
+# so the ~208-column design fits far faster in limma than in DESeq2.
+for (bioc in c("limma", "edgeR")) {
+  if (!requireNamespace(bioc, quietly = TRUE)) BiocManager::install(bioc, ask = FALSE)
+}
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(ggplot2)
+library(ggrepel)
+library(pheatmap)
+library(ggVennDiagram)
+library(RColorBrewer)
+library(limma)
+library(edgeR)
+
+theme_set(theme_bw(base_size = 14))
+
+#' 
+#' # 1. Load GTEx Metadata and Select Paired Donors
+#' 
+## -----------------------------------------------------------------------------
+# The prepared workshop dataset sits in hands_on_datasets/ at the repo root, one level up
+# from quarto_tutorials/. It loads three objects: counts_paired (genes × samples),
+# meta_paired (one row per sample), and genes_paired (id ↔ name).
+load(file.path("..", "hands_on_datasets", "workshop_gtex_multitissue.RData"))
+
+paired_donors <- meta_paired %>%
+  dplyr::distinct(SUBJID, sex)
+
+print(sprintf("Paired donors with muscle and liver: %d", nrow(paired_donors)))
+print(table(paired_donors$sex))
+
+#' 
+#' # 2. Use the Full Paired Set (all donors — sex-imbalanced)
+#' 
+## -----------------------------------------------------------------------------
+# Keep ALL paired donors (no subsampling): the full, sex-imbalanced set.
+selected_meta <- meta_paired %>%
+  mutate(
+    tissue = factor(tissue, levels = c("Muscle", "Liver")),
+    sex = factor(sex, levels = c("Male", "Female")),
+    subject_id = factor(SUBJID),
+    # Sex x tissue interaction indicator (1 = female liver, else 0). Built as an explicit
+    # 2-level FACTOR so the model treats it as a group label, not a continuous covariate.
+    liver_female = factor(ifelse(tissue == "Liver" & sex == "Female", 1, 0), levels = c(0, 1))
+  ) %>%
+  arrange(subject_id, tissue)
+
+print(sprintf("Full paired set: %d samples from %d donors", nrow(selected_meta), length(unique(selected_meta$SUBJID))))
+print(table(selected_meta$sex, selected_meta$tissue))
+
+#' 
+#' # 3. Load Selected Count Columns and Filter Genes
+#' 
+## -----------------------------------------------------------------------------
+selected_ids <- selected_meta$SAMPID
+
+# Subset the prepared count matrix to the selected samples (already integer counts).
+counts_matrix <- counts_paired[, selected_ids, drop = FALSE]
+gene_info <- genes_paired            # columns: gene_id, gene_name
+
+# Keep expressed and variable genes, plus key sex-linked marker genes.
+row_means <- rowMeans(counts_matrix)
+expressed_idx <- which(row_means > 10)
+row_cv <- apply(counts_matrix[expressed_idx, , drop = FALSE], 1, function(x) sd(x) / mean(x))
+top_variable_idx <- expressed_idx[order(row_cv, decreasing = TRUE)[1:5000]]
+
+key_sex_genes <- c("XIST", "RPS4Y1", "DDX3Y", "KDM5D", "UTY", "EIF1AY",
+                   "KDM6A", "DDX3X", "KDM5C", "ZFX", "USP9X")
+sex_gene_idx <- which(gene_info$gene_name %in% key_sex_genes)
+
+keep_idx <- unique(c(top_variable_idx, sex_gene_idx))
+counts_mt <- counts_matrix[keep_idx, , drop = FALSE]
+genes_mt <- gene_info[keep_idx, ]
+
+# Align metadata rows to the count columns (data.frame for model.matrix).
+selected_meta <- as.data.frame(selected_meta)
+rownames(selected_meta) <- selected_meta$SAMPID
+selected_meta <- selected_meta[colnames(counts_mt), ]
+
+print(sprintf("Final multi-tissue dataset: %d genes × %d samples", nrow(counts_mt), ncol(counts_mt)))
+print(table(selected_meta$sex, selected_meta$tissue))
+
+#' 
+#' # 4. PCA: Tissue and Sex Structure
+#' 
+## -----------------------------------------------------------------------------
+# logCPM PCA (limma/edgeR; no DESeq2). Top-1000 most variable genes.
+dge_pca <- calcNormFactors(DGEList(counts_mt))
+logcpm <- cpm(dge_pca, log = TRUE)
+vg <- head(order(apply(logcpm, 1, var), decreasing = TRUE), 1000)
+pc <- prcomp(t(logcpm[vg, ]), scale. = FALSE)
+pca_var <- (pc$sdev^2 / sum(pc$sdev^2))[1:2]
+pca_data <- data.frame(PC1 = pc$x[, 1], PC2 = pc$x[, 2],
+                       tissue = selected_meta$tissue, sex = selected_meta$sex)
+
+p_pca <- ggplot(pca_data, aes(x = PC1, y = PC2, color = tissue, shape = sex)) +
+  geom_point(size = 3, alpha = 0.8) +
+  scale_color_manual(values = c("Muscle" = "#4575B4", "Liver" = "#D73027")) +
+  labs(
+    title = "PCA of Paired GTEx Muscle and Liver Samples (full set)",
+    subtitle = "Tissue is expected to dominate PC1; sex effects may be subtler",
+    x = sprintf("PC1 (%.1f%% variance)", pca_var[1] * 100),
+    y = sprintf("PC2 (%.1f%% variance)", pca_var[2] * 100),
+    color = "Tissue",
+    shape = "Sex"
+  )
+
+print(p_pca)
+
+#' 
+#' # 5. Paired Sex × Tissue Interaction Model
+#' 
+#' ::: {.callout-important}
+#' ## Scenario & flawed design to critique
+#' 
+#' A group wants to know whether sex-biased expression is the same in every tissue. Their draft plan: *"For muscle, run a male-only vs female-only DE analysis; for liver, do the same; then overlap the four hit lists in a Venn diagram and call the non-overlapping genes 'tissue-specific sex effects'."* Critique this before reading on: (i) treating each tissue sample as an independent observation would ignore that the two tissues come from the **same donors** (pseudo-replication; the donor is the experimental unit); (ii) overlapping subgroup hit lists is not a test of sex- or tissue-specificity; (iii) the correct question is a **donor-blocked sex × tissue interaction**, fit below.
+#' :::
+#' 
+#' ::: {.callout-note}
+#' ## Reading the model (plain-language)
+#' 
+#' Our design is `~ subject_id + tissue + liver_female`. Each term has a job:
+#' 
+#' - **`subject_id` — controlling for donor-to-donor variation.** Including it makes the analysis **paired**: it filters out the baseline genetic and environmental noise unique to each individual donor. This ensures that when we compare tissues, we are looking at true tissue differences, not person-to-person variation.
+#' - **`tissue` — the baseline tissue effect.** This accounts for the fundamental liver-vs-muscle difference in gene expression that is **shared across both sexes** — the tissue difference *before* we ask whether sex changes it.
+#' - **`liver_female` — the sex × tissue interaction (the core question).** Instead of only asking *"what changes between liver and muscle?"*, this term asks: *"does the liver-vs-muscle difference look different in females compared to males?"*
+#' 
+#' **Example.** If Gene X is highly expressed in liver and lowly expressed in muscle **in both sexes**, that is a standard tissue effect (captured by `tissue`). But if Gene X **spikes in the female liver while staying flat in the male liver**, that sex-specific pattern is exactly what `liver_female` captures — a sex × tissue interaction.
+#' :::
+#' 
+## -----------------------------------------------------------------------------
+# Donor-blocked interaction via limma-voom. subject_id blocks donor baselines; the
+# liver_female factor is the sex × tissue interaction (level 1 = female liver samples).
+dge <- calcNormFactors(DGEList(counts_mt))
+design_int <- model.matrix(~ subject_id + tissue + liver_female, data = selected_meta)
+v_int <- voom(dge, design_int)
+fit_int <- eBayes(lmFit(v_int, design_int))
+
+# topTable for the interaction coefficient (liver_female factor -> column "liver_female1");
+# rename to DESeq2-style column names so the volcano / heatmap / example-gene code is unchanged.
+res_interaction_df <- topTable(fit_int, coef = "liver_female1", number = Inf, sort.by = "P") %>%
+  as.data.frame() %>%
+  mutate(gene_id = rownames(.)) %>%
+  dplyr::rename(log2FoldChange = logFC, pvalue = P.Value, padj = adj.P.Val) %>%
+  left_join(as.data.frame(genes_mt), by = "gene_id") %>%
+  arrange(padj)
+
+n_sig_int <- sum(res_interaction_df$padj < 0.05, na.rm = TRUE)
+print(sprintf("Interaction coefficient: liver_female | FDR<0.05 hits: %d of %d genes",
+              n_sig_int, nrow(res_interaction_df)))
+print("Top sex × tissue interaction genes:")
+print(head(res_interaction_df[, c("gene_name", "log2FoldChange", "padj")], 20))
+
+#' 
+#' Because each donor has a fixed sex, `subject_id` absorbs baseline donor differences and the overall sex main effect. That is expected. This model asks a more specific paired question: **does the liver-vs-muscle tissue difference change by sex?**
+#' 
+#' ::: {.callout-note}
+#' ## Two ways to write the same interaction — and why the contrast form is clearer
+#' 
+#' To find genes that respond differently to tissue types depending on sex, we created a specific label called liver_female. This label isolates only the female liver samples (marking them as 1, and everything else as 0). This allows the model to directly measure if the liver-vs-muscle differences we see in males are significantly altered in females. It works, but Feuvrier et al. (2026) warn that these hand-built flags can lead to misinterpretation: Because the model measures all effects against an implicit reference group (males, in this case), the standard tissue coefficient specifically represents the "liver-vs-muscle effect in males." Switching the reference group to females silently shifts this baseline and alters the meaning of the coefficient. To eliminate this baseline dependency and the risk of oversight, a more transparent, mathematically equivalent alternative is a no-intercept (cell-means) model with explicit contrasts. This allows you to directly define the precise biological comparisons you want to make:
+#' 
+#' ```r
+#' # Conceptual contrast formulation (e.g. in limma/edgeR on the donor-blocked design):
+#' # group = interaction(sex, tissue)  ->  Male.Muscle, Male.Liver, Female.Muscle, Female.Liver
+#' # design  = ~ subject_id + 0 + group
+#' # contrasts <- makeContrasts(
+#' #   tissue_in_M  = groupMale.Liver   - groupMale.Muscle,
+#' #   tissue_in_F  = groupFemale.Liver - groupFemale.Muscle,
+#' #   interaction  = (groupFemale.Liver - groupFemale.Muscle) -
+#' #                  (groupMale.Liver   - groupMale.Muscle),
+#' #   levels = design)
+#' ```
+#' 
+#' The `interaction` contrast is mathematically identical to the `liver_female` coefficient, but the contrast makes the question — *"is the within-donor tissue effect different in females than in males?"* — unambiguous, and it hands you the per-sex tissue effects for free. Task 2 below asks you to verify the equivalence.
+#' :::
+#' 
+#' # 6. Published-figure pitfall: Venn diagrams from separate subgroup analyses
+#' 
+#' A common paper-style shortcut is to run the liver-vs-muscle comparison separately in males and females, draw a Venn diagram, and label genes outside the overlap as "male-specific" or "female-specific". That is tempting, but it is not a formal test of sex specificity. The correct test is still the interaction term above.
+#' 
+## -----------------------------------------------------------------------------
+# Separate tissue-effect analyses by sex (limma-voom, donor-blocked). Comparing their
+# hit lists is NOT a valid test of sex-specific tissue effects — the interaction is.
+run_tissue_effect_by_sex <- function(sex_level) {
+  keep <- selected_meta$sex == sex_level
+  meta_sub <- droplevels(selected_meta[keep, ])
+  d <- calcNormFactors(DGEList(counts_mt[, keep, drop = FALSE]))
+  des <- model.matrix(~ subject_id + tissue, data = meta_sub)
+  fit <- eBayes(lmFit(voom(d, des), des))
+  tt <- topTable(fit, coef = "tissueLiver", number = Inf)
+  rownames(tt)[tt$adj.P.Val < 0.05]
+}
+
+male_tissue_hits <- run_tissue_effect_by_sex("Male")
+female_tissue_hits <- run_tissue_effect_by_sex("Female")
+interaction_hits <- res_interaction_df$gene_id[which(res_interaction_df$padj < 0.05)]
+
+# Two-way Venn = the pitfall itself: compare the two subgroup lists. (The formal
+# interaction is the correct test; it is reported below and shown in Sections 7 and 9.)
+venn_sets <- list("Males" = male_tissue_hits, "Females" = female_tissue_hits)
+
+p_venn <- ggVennDiagram(venn_sets, label_alpha = 0, set_size = 4) +
+  scale_fill_gradient(low = "white", high = "#4575B4") +
+  scale_x_continuous(expand = expansion(mult = 0.25)) +
+  scale_y_continuous(expand = expansion(mult = 0.12)) +
+  labs(
+    title = "Venn pitfall: liver-vs-muscle hits found separately in each sex",
+    subtitle = "Genes in only one circle are NOT automatically sex-specific — the interaction test is"
+  ) +
+  theme(plot.title = element_text(face = "bold"), legend.position = "none")
+
+print(p_venn)
+
+cat(sprintf(
+  paste0("Male tissue-effect hits: %d | Female tissue-effect hits: %d | ",
+         "Formal sex × tissue interaction hits: %d\n"),
+  length(male_tissue_hits), length(female_tissue_hits), length(interaction_hits)
+))
+
+#' 
+#' **Critical interpretation:** the Venn diagram compares thresholded lists from separate analyses. It does not test whether the liver-vs-muscle effect is statistically different between males and females. For that question, use the donor-blocked interaction model: `~ subject_id + tissue + liver_female`.
+#' 
+#' ::: {.callout-important}
+#' ## Feuvrier et al. (2026): why the non-overlap is so seductive — and a published failure
+#' 
+#' Three reasons a gene can land *outside* the overlap without being sex-specific: (1) **absence of evidence is not evidence of absence** — it may respond similarly in both sexes but miss the threshold in one; (2) **imbalance** between the male and female subsets hands more power to the larger group, inflating its hit count; (3) even **shared** genes can differ in *magnitude*, which the Venn cannot show. Note also that if the two subgroup analyses are **batch-corrected separately**, their expression is no longer directly comparable. Marrocco et al. (2017) built a sex-specificity claim on exactly this non-overlap with a tiny sample; Ziegler et al. (2020) could not reproduce it. The interaction term — not the gene-list comparison — is the test.
+#' :::
+#' 
+#' # 7. Volcano Plot of Tissue-Specific Sex Effects
+#' 
+## -----------------------------------------------------------------------------
+res_interaction_df <- res_interaction_df %>%
+  mutate(
+    significance = case_when(
+      is.na(padj) ~ "NS",
+      padj < 0.05 & abs(log2FoldChange) > 1 ~ "Significant & |LFC|>1",
+      padj < 0.05 ~ "Significant",
+      TRUE ~ "NS"
+    ),
+    label = ifelse(row_number() <= 12 | gene_name %in% key_sex_genes, gene_name, "")
+  )
+
+p_volcano <- ggplot(res_interaction_df, aes(x = log2FoldChange, y = -log10(pvalue), color = significance)) +
+  geom_point(alpha = 0.55, size = 1.3) +
+  ggrepel::geom_text_repel(aes(label = label), color = "black", size = 3.5,
+                           max.overlaps = 30, box.padding = 0.5) +
+  scale_color_manual(values = c("NS" = "grey70",
+                                "Significant" = "#FCA636",
+                                "Significant & |LFC|>1" = "#D73027")) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", alpha = 0.5) +
+  coord_cartesian(clip = "off") +
+  labs(
+    title = "Sex × Tissue Interaction in GTEx Muscle and Liver",
+    subtitle = "Genes where the tissue effect differs between males and females",
+    x = "Interaction log2 fold change",
+    y = "-log10(p-value)",
+    color = "Significance"
+  ) +
+  theme(plot.margin = margin(15, 45, 15, 45))
+
+print(p_volcano)
+
+#' 
+#' # 8. Heatmap of top interaction candidates
+#' 
+#' Heatmaps are useful when they are used **after** the correct statistical test. Here we visualize the top-ranked genes from the donor-blocked sex × tissue interaction model. The heatmap is descriptive; the statistical evidence comes from the model above.
+#' 
+## -----------------------------------------------------------------------------
+norm_counts <- cpm(dge)
+
+heatmap_gene_ids <- res_interaction_df %>%
+  dplyr::filter(!is.na(padj)) %>%
+  dplyr::slice_head(n = 30) %>%
+  dplyr::pull(gene_id)
+
+heatmap_mat <- log2(norm_counts[heatmap_gene_ids, , drop = FALSE] + 1)
+heatmap_mat <- heatmap_mat - rowMeans(heatmap_mat)
+
+heatmap_labels <- genes_mt$gene_name[match(rownames(heatmap_mat), genes_mt$gene_id)]
+heatmap_labels[is.na(heatmap_labels) | heatmap_labels == ""] <- rownames(heatmap_mat)[is.na(heatmap_labels) | heatmap_labels == ""]
+rownames(heatmap_mat) <- make.unique(heatmap_labels)
+
+annotation_col <- data.frame(
+  Sex = selected_meta$sex,
+  Tissue = selected_meta$tissue
+)
+rownames(annotation_col) <- colnames(heatmap_mat)
+
+sample_order <- order(annotation_col$Sex, annotation_col$Tissue)
+
+pheatmap(
+  heatmap_mat[, sample_order, drop = FALSE],
+  annotation_col = annotation_col[sample_order, , drop = FALSE],
+  cluster_cols = FALSE,
+  cluster_rows = TRUE,
+  show_colnames = FALSE,
+  fontsize_row = 7,
+  color = colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(100),
+  main = "Top sex × tissue interaction candidates"
+)
+
+#' 
+#' ::: {.callout-tip}
+#' ## Your turn — describe what you see
+#' 
+#' Pick **3–4 genes** from the heatmap and, *in your own words*, describe the pattern across the four groups (Male muscle, Male liver, Female muscle, Female liver):
+#' 
+#' - Does the gene go up or down from muscle to liver — and is that change the **same** in both sexes, or **different**?
+#' - Which genes look like a genuine **sex × tissue interaction** (the muscle→liver change differs by sex), versus a **shared tissue effect** (both sexes move the same way)?
+#' - Would the heatmap alone convince you the effect is sex-specific? Why is the interaction test in Section 5 still needed?
+#' :::
+#' 
+#' **Good use of a heatmap:** first test the interaction formally, then use the heatmap to inspect the expression pattern. A convincing-looking heatmap alone is not evidence for a sex-specific tissue effect.
+#' 
+#' ::: {.callout-warning}
+#' ## A subtle circularity (double-dipping)
+#' 
+#' This heatmap (and the example-gene plot in Section 9) shows the **top-ranked interaction genes selected by the very model whose result we are illustrating**. That is fine for illustration, but it would be **circular** to turn around and compute a statistic on these selected genes and present it as independent confirmation — the genes were chosen *because* they looked interactive, so they will look interactive again (Feuvrier et al. 2026, "double-dipping"). If you want to *quantify* the strength of the sex × tissue effect, validate the selected genes in an **independent set of donors**, not in the same samples used to rank them.
+#' :::
+#' 
+#' # 9. Plot an Example Interaction Gene
+#' 
+#' ::: {.callout-tip}
+#' ## Your turn — choose the gene
+#' 
+#' In the chunk below, **you choose which gene to plot**. Look at the heatmap in Section 8, pick a gene whose pattern interests you, and set `example_gene` to its name. The default is just the top-ranked interaction gene — change it and re-run to explore others.
+#' :::
+#' 
+## -----------------------------------------------------------------------------
+norm_counts <- cpm(dge)
+
+# CHOOSE YOUR GENE: set this to any gene name you saw in the heatmap above.
+example_gene <- res_interaction_df$gene_name[1]   # <-- change me (e.g. "XIST", "DDX3Y", ...)
+
+example_idx <- which(genes_mt$gene_name == example_gene)[1]
+example_data <- data.frame(
+  expression = log2(norm_counts[example_idx, ] + 1),
+  sex = selected_meta$sex,
+  tissue = selected_meta$tissue,
+  subject_id = selected_meta$subject_id
+)
+
+summary_example <- example_data %>%
+  group_by(sex, tissue) %>%
+  summarise(mean_expression = mean(expression),
+            se = sd(expression) / sqrt(n()),
+            .groups = "drop")
+
+p_example <- ggplot(example_data, aes(x = tissue, y = expression, color = sex, group = sex)) +
+  geom_point(position = position_jitter(width = 0.08), alpha = 0.35) +
+  geom_line(data = summary_example, aes(y = mean_expression), linewidth = 1.2) +
+  geom_point(data = summary_example, aes(y = mean_expression), size = 4) +
+  geom_errorbar(data = summary_example,
+                aes(y = mean_expression,
+                    ymin = mean_expression - se,
+                    ymax = mean_expression + se),
+                width = 0.08, linewidth = 0.8) +
+  scale_color_manual(values = c("Male" = "#2166AC", "Female" = "#B2182B")) +
+  labs(
+    title = sprintf("Example Sex × Tissue Interaction: %s", example_gene),
+    subtitle = "Non-parallel male/female lines indicate a tissue-specific sex effect",
+    x = "Tissue",
+    y = "log2 normalized counts + 1",
+    color = "Sex"
+  )
+
+print(p_example)
+
+#' 
+#' # 10. Demonstration: why an imbalanced design makes the larger sex look more responsive
+#' 
+#' The full set is **sex-imbalanced** — about **2.4 male donors per female**. Feuvrier et al. warn that this alone can make the larger sex look "more responsive." We show it directly, using the same donor-blocked tissue-effect test as the Venn pitfall (Section 6). Because the muscle-vs-liver signal is enormous, we count hits **genome-wide** (all expressed genes, not just the 5k-variable panel) so detection is power-sensitive rather than saturated against a small panel.
+#' 
+## -----------------------------------------------------------------------------
+# Genome-wide expressed genes so hit counts respond to power, not a panel ceiling.
+expr_idx <- which(rowMeans(counts_matrix) > 10)
+counts_gw <- counts_matrix[expr_idx, , drop = FALSE]
+
+# Donor-blocked liver-vs-muscle tissue effect within a chosen set of samples.
+tissue_hit_ids <- function(sample_mask) {
+  meta_sub <- droplevels(selected_meta[sample_mask, ])
+  d <- calcNormFactors(DGEList(counts_gw[, sample_mask, drop = FALSE]))
+  des <- model.matrix(~ subject_id + tissue, data = meta_sub)
+  fit <- eBayes(lmFit(voom(d, des), des))
+  tt <- topTable(fit, coef = "tissueLiver", number = Inf)
+  rownames(tt)[tt$adj.P.Val < 0.05]
+}
+
+male_mask <- selected_meta$sex == "Male"
+female_mask <- selected_meta$sex == "Female"
+n_female <- length(unique(selected_meta$subject_id[female_mask]))
+n_male <- length(unique(selected_meta$subject_id[male_mask]))
+
+# Full imbalanced design: all male donors vs all female donors.
+mh <- tissue_hit_ids(male_mask)
+fh <- tissue_hit_ids(female_mask)
+male_only_imb <- length(setdiff(mh, fh))
+female_only_imb <- length(setdiff(fh, mh))
+
+cat(sprintf(
+  "FULL imbalanced design (%d M vs %d F donors), genome-wide tissue hits:\n  Male: %d | Female: %d | Male-only: %d | Female-only: %d | shared: %d\n",
+  n_male, n_female, length(mh), length(fh),
+  male_only_imb, female_only_imb, length(intersect(mh, fh))))
+
+# Control: down-sample males to the female N and repeat. A biological asymmetry would
+# persist; a power artifact should disappear.
+male_subjects <- unique(as.character(selected_meta$subject_id[male_mask]))
+set.seed(42)
+reps <- 5
+down <- t(sapply(seq_len(reps), function(i) {
+  ks <- sample(male_subjects, n_female)
+  msk <- male_mask & as.character(selected_meta$subject_id) %in% ks
+  mh_d <- tissue_hit_ids(msk)
+  c(male_only = length(setdiff(mh_d, fh)), female_only = length(setdiff(fh, mh_d)))
+}))
+male_only_bal <- mean(down[, "male_only"])
+female_only_bal <- mean(down[, "female_only"])
+cat(sprintf(
+  "\nControl - males down-sampled to n=%d (mean of %d draws):\n  Male-only: %.0f | Female-only: %.0f  -> the asymmetry collapses at equal N\n",
+  n_female, reps, male_only_bal, female_only_bal))
+
+#' 
+## -----------------------------------------------------------------------------
+#| fig-height: 4
+lab_imb <- sprintf("Imbalanced\n(%d M vs %d F)", n_male, n_female)
+lab_bal <- sprintf("Balanced\n(%d M vs %d F)", n_female, n_female)
+imb <- data.frame(
+  design = factor(rep(c(lab_imb, lab_bal), each = 2), levels = c(lab_imb, lab_bal)),
+  list = rep(c("Male-only", "Female-only"), 2),
+  n = c(male_only_imb, female_only_imb, male_only_bal, female_only_bal)
+)
+p_imb <- ggplot(imb, aes(x = list, y = n, fill = list)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = round(n)), vjust = -0.3, size = 3.5) +
+  facet_wrap(~ design) +
+  scale_fill_manual(values = c("Male-only" = "#2166AC", "Female-only" = "#B2182B")) +
+  labs(title = "Imbalance inflates the larger sex's \"specific\" gene list",
+       subtitle = "Same biology; the male-only surplus is a sample-size artifact that shrinks at equal N",
+       x = NULL, y = "Genes significant in one sex only (genome-wide, FDR<0.05)") +
+  theme_bw(base_size = 12) + theme(legend.position = "none")
+print(p_imb)
+
+#' 
+#' **Interpretation.** With ~2.4× more male donors, the "male-only" tissue-effect list dwarfs the "female-only" list — exactly the non-overlap a paper might label "male-specific." Down-sample the males to the female N and the two lists become comparable: the surplus was **power from imbalance, not biology** (Feuvrier et al. 2026). This is why a balanced design plus the formal interaction test — not the relative sizes of subgroup hit lists — is the correct way to judge sex-specificity.
+#' 
+#' # 11. Exercise: tasks
+#' 
+#' ::: {.callout-note}
+#' ## Tasks
+#' 
+#' 1. **Redesign / defend the unit.** Rewrite the flawed plan's sample-size statement so N counts **donors**, not tissue samples, and justify the donor-blocked model as the design that respects the experimental unit.
+#' 2. **Equivalence.** Implement the no-intercept contrast formulation sketched in Section 5 and confirm that the `interaction` contrast reproduces the `liver_female` coefficient (same log-fold-changes and p-values, up to sign convention).
+#' 3. **Power & imbalance.** Using the interaction-power logic from the liver module (Exercise 2.1b), comment on how the **smaller sex's N (61 female donors)** limits detection of a modest sex × tissue interaction here. Then relate it to the Section 10 demonstration: why does the larger (male) group accumulate more subgroup "hits," and why is that not evidence of stronger male tissue responses?
+#' 4. **Visualize.** For two top-ranked genes, draw the Section 9 **interaction plot** (tissue on x, sex as lines, SEM error bars). State why non-parallel lines indicate the interaction, and why a heatmap would not let a reader judge the effect size.
+#' :::
+#' 
+#' # 12. Session info
+#' 
+#' Recorded so results can be traced to exact package (and GTEx) versions — if a re-run gives different numbers, compare this block first.
+#' 
+## -----------------------------------------------------------------------------
+sessionInfo()
+

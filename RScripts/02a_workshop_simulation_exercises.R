@@ -1,0 +1,351 @@
+#' ---
+#' title: "Hands-on Exercise: Experimental Design & Power Simulation"
+#' subtitle: "EU-SABV Workshop"
+#' author: "Vidhya Jagannathan, University of Bern, Switzerland"
+#' format:
+#'   html:
+#'     toc: true
+#'     toc-depth: 3
+#'     toc-location: left
+#'     number-sections: true
+#'     code-fold: false
+#'     code-tools: true
+#'     theme: cosmo
+#'     css: styles.css
+#' execute:
+#'   echo: true
+#'   warning: true
+#'   message: true
+#'   error: true
+#'   eval: true
+#' ---
+#' 
+#' > Design-phase tutorial: simulate cohorts to see how including both sexes, cohort size, and the main-effect-vs-interaction distinction change your statistical power — *before* any real data are collected.
+#' 
+#' # Overview
+#' 
+#' Script 02a: Experimental Design — Sex as Biological Variable in Genomics.
+#' 
+#' This tutorial is purely a **simulation** exercise. No sequencing data are needed: we generate synthetic cohorts, run simple linear models, and repeat the experiment thousands of times to measure statistical **power** directly. The next tutorial (`02b_workshop_gtex_liver_exploration`) then applies these ideas to real GTEx liver data.
+#' 
+#' ::: {.callout-note}
+#' ## Primary literature for this module
+#' 
+#' - **Reynolds (2024)**, *A Guide to Sample Size for Animal-based Studies* (Wiley). Source for: the experimental vs biological unit, pseudo-replication, effect sizes, the lower power of interaction terms relative to main effects, factorial/screening efficiency, and "right-sizing not significance" (3Rs).
+#' - **Gaskill et al. (2025)**, *eLife* — the survey of researcher *barriers and misconceptions* about studying sex as a variable; source of the percentage claims (e.g. "including both sexes doubles the sample size") the simulations are designed to correct.
+#' - **Karp et al. (2025)**, *Nature Communications* — the **SIRF** framework for analysing sex as a biological variable (the framework name belongs to this paper, not to the Gaskill survey).
+#' :::
+#' 
+#' ## Load Packages
+#' 
+## -----------------------------------------------------------------------------
+#| message: false
+#| warning: false
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Set a consistent theme
+theme_set(theme_bw(base_size = 14))
+
+#' 
+#' # EXPERIMENTAL DESIGN - Power Simulation Exercise
+#' 
+#' ## EXERCISE 2.1: Compare designs — n=50M/50F vs n=100M
+#' 
+## -----------------------------------------------------------------------------
+# KEY MISCONCEPTION ADDRESSED: "Including both sexes doubles sample size"
+# Reality: N is SHARED between sexes in exploratory inclusion
+# (Gaskill et al. 2025: 80% of researchers held this misconception)
+# STEP 1: Look at ONE experiment first, to understand what's happening.
+
+# --- Phase 1: Experimental Design Setup ---
+# Define cohort size: N = 100
+n_mice <- 100
+# Create the treatment vector:
+# 0 = Control group (n = 50 mice)
+# 1 = Experimental drug-treatment group (n = 50 mice)
+treatment <- c(rep(0, 50), rep(1, 50))
+
+# --- Phase 2: Define the biological signal and the noise ---
+# Define the biological effect of the drug. On average, treated mice experience
+# a 0.5-unit improvement in liver function.
+true_drug_effect <- 0.5
+# Natural phenotypic variation: inter-individual variability between mice due to
+# genetics, environment, or handling.
+mouse_sd <- 1.0
+# Standardized effect size (Cohen's d) = the signal-to-noise ratio of the treatment effect.
+# A value of 0.5 ("medium") means the drug effect is half the size of natural individual
+# variation — it works at the group level, but treated and untreated mice still look
+# alike one-to-one.
+sprintf("Effect size (Cohen's d) = %.2f", true_drug_effect / mouse_sd)
+
+# --- Phase 3: Simulate the data ---
+set.seed(42)  # reproducible noise
+# Outcome = drug effect (in treated mice) + individual biological variability
+liver_function <- true_drug_effect * treatment + rnorm(n_mice, mean = 0, sd = mouse_sd)
+
+# --- Phase 4: Data Wrangling ---
+# Create a dataframe and assign factor labels for analysis and plotting.
+experiment_data <- data.frame(
+  mouse_id = 1:n_mice,
+  treatment = factor(treatment, levels = c(0, 1), labels = c("Control", "Drug")),
+  liver_function = liver_function
+)
+
+# --- Phase 5: Descriptive Statistics ---
+# Check group means against the true effect size.
+means <- experiment_data %>%
+  group_by(treatment) %>%
+  summarise(mean_lf = mean(liver_function), .groups = "drop")
+sprintf("Control: %.2f | Drug: %.2f | Diff: %.2f",
+        means$mean_lf[1], means$mean_lf[2], diff(means$mean_lf))
+
+# Boxplot of the single experiment, with group means marked
+p_single <- ggplot(experiment_data, aes(x = treatment, y = liver_function, fill = treatment)) +
+  geom_boxplot(alpha = 0.6, outlier.size = 1) +
+  geom_jitter(width = 0.15, alpha = 0.3, size = 2) +
+  # Automatically calculates and plots the mean as a red 'X'
+  stat_summary(fun = mean, geom = "point", color = "red", size = 4, shape = 4) +
+  scale_fill_manual(values = c("Control" = "lightblue", "Drug" = "lightcoral")) +
+  labs(
+    title = "Drug Effect on Liver Function",
+    subtitle = "Red X = group mean",
+    y = "Liver Function (units)", x = ""
+  ) +
+  theme_minimal() +               # cleans up the background grid
+  theme(legend.position = "none")
+
+print(p_single)
+
+# Run a linear regression to test for differences between treatment groups.
+fit_single <- lm(liver_function ~ treatment, data = experiment_data)
+# p-value for the treatment effect
+p_value_single <- summary(fit_single)$coefficients[2, 4]
+sprintf("Experimental p-value: %.4f", p_value_single)
+
+# STEP 2: Simulate the same experiment 1,000 times to determine power. Power is the
+# probability of detecting a true biological effect as statistically significant (p < 0.05).
+run_one_experiment <- function(n_control = 50, n_drug = 50, true_effect = 0.5) {
+  treatment <- c(rep(0, n_control), rep(1, n_drug))
+  outcome   <- true_effect * treatment + rnorm(n_control + n_drug, 0, 1)
+  fit       <- lm(outcome ~ treatment)
+  p_value   <- summary(fit)$coefficients[2, 4]
+  detected  <- p_value < 0.05
+  return(detected)
+}
+
+# Run the experiment 1000 times
+results_A <- replicate(1000, run_one_experiment(n_control = 50, n_drug = 50, true_effect = 0.5))
+power_A <- mean(results_A)
+sprintf("Detected drug effect in %d / 1000 experiments | POWER = %.1f%%",
+        sum(results_A), power_A * 100)
+
+# STEP 3: Compare three study designs.
+# The function runs many simulated experiments using cohorts of both sexes and
+# counts how often it picks up two signals:
+#   - the drug effect — does the treatment change liver function?
+#   - the sex difference — do males and females have different baseline liver function?
+# The three designs:
+#   A: 100 males only          (N = 100) — can test the drug, but not sex
+#   B: 50 males + 50 females   (N = 100) — same total N, split across sexes
+#   C: 100 males + 100 females (N = 200) — both sexes, double the sample size
+# Comparing them shows how cohort size and including both sexes change our
+# ability to detect each signal.
+simulate_power_design <- function(n_male, n_female, true_treatment_effect,
+                                   true_sex_effect = 0, n_sims = 1000) {
+
+  # Track, per simulation, whether each main effect was significant (p < 0.05).
+  detection <- data.frame(treatment = logical(n_sims), sex = logical(n_sims))
+
+  for (i in 1:n_sims) {
+    # Split by sex and randomize treatment within each sex (balanced arms).
+    sex <- c(rep(0, n_male), rep(1, n_female))
+    treatment <- c(sample(rep(0:1, c(n_male / 2, n_male / 2))),
+                   sample(rep(0:1, c(n_female / 2, n_female / 2))))
+
+    # Simulate data: treatment effect + sex difference + noise (no true interaction).
+    outcome <- true_treatment_effect * treatment +
+               true_sex_effect * sex +
+               rnorm(n_male + n_female, 0, 1)
+
+    # Factorial model; each main effect is estimated adjusted for the other.
+    pvals <- summary(lm(outcome ~ treatment + sex))$coefficients[, 4]
+    detection$treatment[i] <- pvals["treatment"] < 0.05
+    detection$sex[i]       <- pvals["sex"] < 0.05
+  }
+
+  colMeans(detection)   # power to detect each main effect
+}
+
+# Design A — 100 males only: 50 control + 50 drug.
+set.seed(42)
+power_A_simple <- mean(replicate(1000, {
+  y <- 0.5 * c(rep(0, 50), rep(1, 50)) + rnorm(100)
+  summary(lm(y ~ c(rep(0, 50), rep(1, 50))))$coefficients[2, 4] < 0.05
+}))
+sprintf("Design A — drug-effect power: %.1f%%", power_A_simple * 100)
+
+# Designs B and C — both sexes, analysed with the factorial model lm(outcome ~ treatment + sex).
+# Reuse simulate_power_design() (true sex effect = 0.3 SD, no true interaction):
+#   B: 50 M + 50 F   (N = 100, same total as A)
+#   C: 100 M + 100 F (N = 200, confirmatory)
+power_B <- simulate_power_design(n_male = 50,  n_female = 50,
+                                 true_treatment_effect = 0.5, true_sex_effect = 0.3)
+power_C <- simulate_power_design(n_male = 100, n_female = 100,
+                                 true_treatment_effect = 0.5, true_sex_effect = 0.3)
+
+# Pull out the scalars used by the plot and summaries below.
+power_B_treatment <- power_B["treatment"]; power_B_sex <- power_B["sex"]
+power_C_treatment <- power_C["treatment"]; power_C_sex <- power_C["sex"]
+
+sprintf("Design B (N=100) — drug %.1f%%, sex %.1f%%", power_B_treatment * 100, power_B_sex * 100)
+sprintf("Design C (N=200) — drug %.1f%%, sex %.1f%%", power_C_treatment * 100, power_C_sex * 100)
+
+# Visualization comparing designs
+comparison_data <- data.frame(
+  Design = c("A: Males only\n(n=100)",
+             "B: Both sexes\n(n=100 shared)",
+             "C: Both sexes\n(n=200)"),
+  Drug_Effect = c(power_A_simple * 100, power_B_treatment * 100, power_C_treatment * 100),
+  Sex_Difference = c(NA, power_B_sex * 100, power_C_sex * 100)
+)
+
+plot_data <- comparison_data %>%
+  pivot_longer(cols = -Design, names_to = "Outcome", values_to = "Power") %>%
+  filter(!is.na(Power))
+
+p_power <- ggplot(plot_data, aes(x = Design, y = Power, fill = Outcome)) +
+  geom_col(position = "dodge", alpha = 0.7) +
+  geom_hline(yintercept = 80, linetype = "dashed", color = "red", linewidth = 1) +
+  scale_fill_manual(values = c("Drug_Effect" = "#2166AC", "Sex_Difference" = "#B2182B")) +
+  coord_cartesian(ylim = c(0, 100)) +
+  labs(
+    title = "Comparing Study Designs: Power to Detect Effects",
+    subtitle = "Red dashed line = 80% power (standard in biology)",
+    y = "Statistical Power (%)",
+    x = "",
+    fill = ""
+  ) +
+  theme(axis.text = element_text(size = 11),
+        legend.position = "bottom")
+
+print(p_power)
+
+sprintf(paste0(
+  "Design B (N=100 shared): treatment power %.1f%%, sex-difference power %.1f%%. ",
+  "Design C (N=200): treatment power %.1f%%, sex-difference power %.1f%%."),
+  power_B_treatment * 100, power_B_sex * 100, power_C_treatment * 100, power_C_sex * 100)
+
+#' 
+#' ::: {.callout-note collapse="true"}
+#' ## Interpretation — try to reason it out yourself first, then expand
+#' 
+#' Before opening this: look at the three bars. Which design reaches 80% power for the drug effect? Should Designs A and B differ on the *drug* effect at all? Why is the sex-difference bar so low?
+#' 
+#' - **Design A** (males only, n = 100): reaches only 70% power — below the 80% threshold — and by design cannot detect sex differences or flag whether the drug works differently in females.
+#' - **Design B** (both sexes, n = 100 shared): the drug-effect power (~72%) is **essentially identical to Design A** — and it *should* be, since the two designs have the same total N and the same treatment effect, and putting sex in the model removes its variance rather than adding noise. The small A-vs-B gap is Monte-Carlo (sampling) error from running finitely many simulations, not a real benefit of adding a second sex; with a fixed seed and enough replicates it would disappear. The point is the *opposite* of a cost: including both sexes does **not** dilute the drug-effect analysis, and it hands you the sex-difference test for free. The low power for that sex effect (32%) simply reflects that the baseline male-to-female difference here is small.
+#' - **Design C** (both sexes, n = 200): a larger cohort shows that doubling the sample size predictably amplifies both signals (pushing drug-effect power to 94% and sex-difference power to 54%).
+#' :::
+#' 
+#' ## BONUS: What if the sex effect was larger?
+#' 
+#' What if sex differences were as large as the drug effect — say 0.5 SD of baseline biology instead of 0.3? Re-run designs B and C and compare the sex-difference power.
+#' 
+## -----------------------------------------------------------------------------
+# Re-run designs B and C with a larger true sex effect (0.5 SD instead of 0.3),
+# using the same factorial simulator.
+set.seed(42)
+power_B_alt <- simulate_power_design(n_male = 50,  n_female = 50,
+                                     true_treatment_effect = 0.5, true_sex_effect = 0.5)
+power_C_alt <- simulate_power_design(n_male = 100, n_female = 100,
+                                     true_treatment_effect = 0.5, true_sex_effect = 0.5)
+
+power_B_alt_treatment <- power_B_alt["treatment"]; power_B_alt_sex <- power_B_alt["sex"]
+power_C_alt_treatment <- power_C_alt["treatment"]; power_C_alt_sex <- power_C_alt["sex"]
+
+sprintf(paste0(
+  "Sex effect 0.3 SD — sex-difference power: Design B %.1f%%, Design C %.1f%%. ",
+  "Sex effect 0.5 SD — sex-difference power: Design B %.1f%%, Design C %.1f%%."),
+  power_B_sex * 100, power_C_sex * 100,
+  power_B_alt_sex * 100, power_C_alt_sex * 100)
+
+#' 
+#' **Takeaway.**
+#' 
+#' 1. **Subtle sex differences (0.3 SD)** — comparable to minor baseline weight shifts. Power stays low (~54%) even at n = 200. This is an inherent trait of small biological effect sizes, not a failure of the dual-sex design.
+#' 2. **Strong sex differences (0.5 SD)** — equal to the drug effect itself. Power reaches ~69% at n = 100 and ~94% at n = 200. Prominent dimorphism is easily captured using standard, well-powered study layouts.
+#' 
+#' **Practical implication:** include both sexes in the initial experiment to screen for sex differences at low cost. If a sex-specific signal emerges, estimate its effect size and use that to power a focused follow-up study — rather than doubling cohort sizes upfront, which wastes animals and adds no statistical benefit. This also keeps the study aligned with the **3Rs** principles, and with Reynolds's "**right-sizing, not significance**" and **sequential/screening** logic (Reynolds 2024, §3.10–3.11): screen broadly, then run a definitive, well-powered confirmatory study only on the signals that survive.
+#' 
+#' ## EXERCISE 2.1b: The interaction costs more power than a main effect
+#' 
+#' The previous designs powered the *main effects* of treatment and sex. But the SABV question that usually matters is the **interaction**: does the drug work *differently* in males and females? Reynolds (2024, Ch. 19, citing Jones & Nachtsheim 2011) states the rule directly: in factorial designs, **statistical power is highest for main effects and lower for interactions** — coefficient power follows a hierarchy. The widely used rule of thumb is that detecting an interaction of a given magnitude needs roughly **four times** the sample size required to detect a main effect of the same magnitude. The simulation below makes this concrete.
+#' 
+## -----------------------------------------------------------------------------
+# Power to detect a true sex x treatment INTERACTION versus the treatment MAIN effect,
+# under the factorial model lm(outcome ~ treatment * sex).
+#
+# Two design choices keep the comparison fair:
+#   1. We set the true AVERAGE treatment effect and the true interaction to the same
+#      magnitude (0.5 SD), so any power gap is the interaction penalty, not a size gap.
+#   2. We EFFECT-code treatment and sex as -0.5/+0.5 (not 0/1). With 0/1 dummy coding the
+#      `treatment` coefficient would be the treatment effect in the *reference sex only*
+#      (a simple effect), not the average main effect -- the exact baseline-coding trap
+#      shown in the next tutorial (02b, Exercise 3.5). Effect coding makes the
+#      `treatment` coefficient the genuine average main effect.
+simulate_interaction_power <- function(n_per_cell, main_effect = 0.5, interaction_effect = 0.5,
+                                       n_sims = 1000) {
+  detect_main <- logical(n_sims); detect_int <- logical(n_sims)
+  # The interaction is the gap between the female and male treatment effects. Split it
+  # symmetrically around the average so the average treatment effect stays = main_effect.
+  male_effect   <- main_effect - interaction_effect / 2
+  female_effect <- main_effect + interaction_effect / 2
+  for (i in 1:n_sims) {
+    sex       <- rep(c(-0.5, 0.5), each = 2 * n_per_cell)      # -0.5 = M, +0.5 = F
+    treatment <- rep(rep(c(-0.5, 0.5), each = n_per_cell), 2)  # -0.5 = control, +0.5 = treated
+    # Each treated animal gets its sex-specific treatment effect; controls get 0. Plus noise.
+    treat_effect <- ifelse(sex < 0, male_effect, female_effect)
+    outcome <- (treatment > 0) * treat_effect + rnorm(length(sex), 0, 1)
+    co <- summary(lm(outcome ~ treatment * sex))$coefficients[, 4]
+    detect_main[i] <- co["treatment"] < 0.05        # average treatment (main) effect
+    detect_int[i]  <- co["treatment:sex"] < 0.05    # sex x treatment interaction
+  }
+  c(treatment = mean(detect_main), interaction = mean(detect_int))
+}
+
+set.seed(42)
+int_grid <- data.frame(n_per_cell = c(25, 50, 100, 200))
+int_power <- t(sapply(int_grid$n_per_cell, simulate_interaction_power))
+int_tab <- cbind(int_grid, as.data.frame(int_power * 100))
+print(int_tab)
+
+# Interaction plot of power: two lines (effect type) across total N.
+int_long <- int_tab %>%
+  mutate(total_N = n_per_cell * 4) %>%
+  pivot_longer(c(treatment, interaction), names_to = "Effect", values_to = "Power")
+
+p_int_power <- ggplot(int_long, aes(x = total_N, y = Power, color = Effect, group = Effect)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  geom_hline(yintercept = 80, linetype = "dashed", color = "red") +
+  scale_color_manual(values = c("treatment" = "#2166AC", "interaction" = "#B2182B"),
+                     labels = c("treatment" = "Treatment main effect",
+                                "interaction" = "Sex x treatment interaction")) +
+  labs(title = "Power Hierarchy: Main Effect vs Interaction",
+       subtitle = "Same true magnitude (0.5 SD) for both; the interaction needs far more animals",
+       x = "Total N (balanced 2x2)", y = "Statistical Power (%)", color = "") +
+  coord_cartesian(ylim = c(0, 100)) +
+  theme(legend.position = "bottom")
+print(p_int_power)
+
+#' 
+#' The interaction line sits well below the main-effect line at every sample size: a design that is comfortably powered to *detect* a drug effect can be badly **underpowered to test whether that effect differs by sex**. This is the quantitative reason a single exploratory cohort can legitimately *screen* for sex differences but usually cannot *confirm* them — the confirmatory interaction study must be sized for the interaction, not the main effect.
+#' 
+#' One caveat on how to read this. The ~4× gap assumes we care about an interaction of the *same magnitude* as the main effect — a deliberately hard, worst-case comparison. The interactions that matter most for **generalisability** are often much larger: a treatment that works in one sex but is flat in the other, or acts in opposite directions. Those are easier to detect than this equal-magnitude case. So treat the 4× rule as a *floor* on the effort an interaction test needs, not a fixed multiplier — and note that it is scenario-dependent, tied to the effect size you decide is worth detecting.
+#' 
+#' ::: {.callout-tip}
+#' ## Where to go next
+#' 
+#' The next tutorial **`02b_workshop_gtex_liver_exploration`** applies these design principles to real GTEx liver RNA-seq data: testing the "females are more variable" myth, running PCA and differential expression, fitting the factorial sex × age model, and demonstrating the common analysis mistakes (pooling, disaggregation, comparing subgroup p-values).
+#' :::

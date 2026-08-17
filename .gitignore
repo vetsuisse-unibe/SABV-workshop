@@ -1,0 +1,38 @@
+# SABV workshop repo — track only the clean exercise set (ex 1, 2a, 2b, 3a, 3b + liver data).
+# Ignore everything by default, then un-ignore the specific files we distribute.
+*
+
+!.gitignore
+!README.md
+!LICENSE
+
+# Exercise R scripts (source only)
+!RScripts/
+RScripts/*
+!RScripts/01_download_prepare_GTEx_liver.R
+!RScripts/02a_workshop_simulation_exercises.R
+!RScripts/02b_workshop_gtex_liver_exploration.R
+!RScripts/03a_gtex_multitissue_interaction.R
+!RScripts/03b_gtex_multitissue_interaction_fullset.R
+!RScripts/regenerate.R
+
+# Quarto tutorials (source .qmd + shared stylesheet only — no rendered html / _files)
+!quarto_tutorials/
+quarto_tutorials/*
+!quarto_tutorials/styles.css
+!quarto_tutorials/01_download_prepare_GTEx_liver.qmd
+!quarto_tutorials/02a_workshop_simulation_exercises.qmd
+!quarto_tutorials/02b_workshop_gtex_liver_exploration.qmd
+!quarto_tutorials/03a_gtex_multitissue_interaction.qmd
+!quarto_tutorials/03b_gtex_multitissue_interaction_fullset.qmd
+
+# Rendered HTML (self-contained), kept in html/ so tutorials can be read without running R
+!html/
+html/*
+!html/*.html
+
+# Datasets: liver (ex 2b) and paired multi-tissue (ex 3a/3b)
+!hands_on_datasets/
+hands_on_datasets/*
+!hands_on_datasets/workshop_gtex_liver.RData
+!hands_on_datasets/workshop_gtex_multitissue.RData

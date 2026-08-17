@@ -1,0 +1,72 @@
+/* Workshop tutorial styling: code in grey boxes, output in white boxes */
+
+/* Main page readability */
+body {
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+/* R code chunks */
+div.sourceCode,
+.cell-code,
+pre.sourceCode {
+  background-color: #f2f2f2 !important;
+  border: 1px solid #d0d0d0 !important;
+  border-left: 5px solid #8a8a8a !important;
+  border-radius: 6px !important;
+}
+
+.cell-code pre,
+pre.sourceCode,
+.sourceCode pre {
+  background-color: #f2f2f2 !important;
+  margin-bottom: 0 !important;
+}
+
+/* Console/text output chunks */
+.cell-output,
+.cell-output-stdout,
+.cell-output-stderr,
+.cell-output-display {
+  background-color: #ffffff !important;
+  border: 1px solid #d9d9d9 !important;
+  border-left: 5px solid #2b8cbe !important;
+  border-radius: 6px !important;
+  padding: 0.75em 1em !important;
+  margin-top: 0.25em !important;
+  margin-bottom: 1.2em !important;
+}
+
+.cell-output pre,
+.cell-output-stdout pre,
+.cell-output-stderr pre {
+  background-color: #ffffff !important;
+  border: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  white-space: pre-wrap;
+}
+
+/* Warnings/errors get a warmer accent */
+.cell-output-stderr {
+  border-left-color: #d95f02 !important;
+}
+
+/* Give each executable cell a little breathing room */
+.cell {
+  margin-bottom: 1.4rem;
+}
+
+/* Keep code copy button visible but unobtrusive */
+.code-copy-button {
+  background-color: #eeeeee !important;
+  border: 1px solid #cfcfcf !important;
+}
+
+/* Inline code */
+p code, li code, td code {
+  background-color: #f3f3f3;
+  color: #333333;
+  padding: 0.1em 0.25em;
+  border-radius: 3px;
+}
