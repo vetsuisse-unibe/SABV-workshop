@@ -22,6 +22,23 @@
 #' 
 #' > Hands-on tutorial using GTEx v8 multi-tissue data to test whether sex-biased expression is tissue-specific.
 #' 
+#' ## Learning objectives
+#' 
+#' By the end of this tutorial, you will be able to:
+#' 
+#' 1. identify the experimental unit in a repeated-measures study;
+#' 2. interpret a sex × tissue interaction coefficient and interaction plot;
+#' 3. distinguish a formal interaction test from overlap between subgroup gene lists;
+#' 4. answer the same biological question using an explicit contrast.
+#' 
+#' Key terms used in this module:
+#' 
+#' - **Experimental unit:** the independent unit that was sampled — here, the donor, not each tissue tube.
+#' - **Repeated measure:** another observation from the same experimental unit.
+#' - **Blocking:** including donor identity in the model to account for stable donor-to-donor differences.
+#' - **Interaction contrast:** the tissue effect in females minus the tissue effect in males.
+#' - **limma-voom:** an RNA-seq workflow that estimates the count–variance relationship, then fits fast linear models.
+#' 
 #' ::: {.callout-note}
 #' ## Where the data comes from
 #' 
