@@ -22,6 +22,13 @@
 #' 
 #' > Hands-on tutorial using GTEx v8 multi-tissue data to test whether sex-biased expression is tissue-specific.
 #' 
+#' ## Learning objectives
+#' 
+#' By the end of this tutorial, you will be able to:
+#' 
+#' 1. explain how unequal group sizes create unequal power;
+#' 2. explain why the formal interaction test remains the relevant test of sex specificity.
+#' 
 #' ::: {.callout-note}
 #' ## Where the data comes from
 #' 
