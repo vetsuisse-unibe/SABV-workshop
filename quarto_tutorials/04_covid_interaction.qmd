@@ -44,7 +44,7 @@ In this example we'll work with a plasma RNAseq dataset from hospitalized patien
 The dataset additionally includes patients of both sexes:
 
 ```{r load}
-se <- readRDS("GSE157103_subset.SE.rds")
+se <- readRDS(file.path("..", "hands_on_datasets", "GSE157103_subset.SE.rds"))
 table(se$disease, se$gender)
 ```
 
