@@ -37,3 +37,4 @@ html/*
 hands_on_datasets/*
 !hands_on_datasets/workshop_gtex_liver.RData
 !hands_on_datasets/workshop_gtex_multitissue.RData
+!hands_on_datasets/GSE157103_subset.SE.rds
