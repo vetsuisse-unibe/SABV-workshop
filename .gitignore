@@ -6,6 +6,10 @@
 !README.md
 !LICENSE
 
+# Landing page for GitHub Pages (front door + source)
+!index.qmd
+!index.html
+
 # Exercise R scripts (source only)
 !RScripts/
 RScripts/*

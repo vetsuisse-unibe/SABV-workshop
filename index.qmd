@@ -1,0 +1,26 @@
+---
+title: "SABV Workshop — Hands-on Tutorials"
+subtitle: "Sex As a Biological Variable · 24–25 August 2026 · DKFZ Heidelberg"
+format:
+  html:
+    theme: cosmo
+    css: quarto_tutorials/styles.css
+    toc: false
+    number-sections: false
+    embed-resources: true
+---
+
+Tutorials and prepared datasets for the **Sex As a Biological Variable (SABV)** workshop. Each tutorial is a self-contained page you can read here and run yourself in RStudio.
+
+**Recommended order:** [02a](html/02a_workshop_simulation_exercises.html) → [02b](html/02b_workshop_gtex_liver_exploration.html) → [03a](html/03a_gtex_multitissue_interaction.html) → [04](html/04_covid_interaction.html). **03b** is an optional extension. *(01 prepares the data, which already ships with the repo.)*
+
+| Exercise | What it covers |
+|---|---|
+| [**02a · Experimental design &amp; power**](html/02a_workshop_simulation_exercises.html) | Simulate cohorts; power for main effects vs interactions; why both sexes ≠ double N. *(~45–60 min)* |
+| [**02b · GTEx liver SABV exploration**](html/02b_workshop_gtex_liver_exploration.html) | Variability myth, PCA, differential expression, sex × age model, and common analysis pitfalls. *(~90–120 min)* |
+| [**03a · Multi-tissue interaction (balanced)**](html/03a_gtex_multitissue_interaction.html) | Paired donors, donor-blocked sex × tissue model, explicit contrasts. *(~75–90 min)* |
+| [**03b · Full imbalanced set**](html/03b_gtex_multitissue_interaction_fullset.html) *(optional)* | How unequal group sizes distort subgroup hit lists. *(~45–60 min)* |
+| [**04 · Disease × sex interaction (COVID)**](html/04_covid_interaction.html) | Staged FDR and interaction analysis in a COVID dataset. *(~60 min)* |
+| [**01 · Dataset preparation**](html/01_download_prepare_GTEx_liver.html) | How the GTEx liver subset was built (prepared data already provided). |
+
+Prepared datasets ship in `hands_on_datasets/` — no large downloads needed for 02b, 03a/b, or 04.
