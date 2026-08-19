@@ -28,6 +28,21 @@
 #' 
 #' This tutorial is purely a **simulation** exercise. No sequencing data are needed: we generate synthetic cohorts, run simple linear models, and repeat the experiment thousands of times to measure statistical **power** directly. The next tutorial (`02b_workshop_gtex_liver_exploration`) then applies these ideas to real GTEx liver data.
 #' 
+#' ## Learning objectives
+#' 
+#' By the end of this tutorial, you will be able to:
+#' 
+#' 1. Define statistical power as the probability of detecting a genuine effect.
+#' 2. Differentiate total sample size from sample size per group.
+#' 3. Compare statistical power when detecting a main effect versus an interaction.
+#' 4. Understand why introducing both sexes does not necessarily require doubling your animal count.
+#' 
+#' Key terms used in this module:
+#' 
+#' - **Effect size:** how large the biological signal is relative to background noise.
+#' - **Power:** how consistently a study detects a true effect across repeated trials.
+#' - **Interaction:** when a treatment outcome depends on another variable — such as a drug affecting males and females differently.
+#' 
 #' ::: {.callout-note}
 #' ## Primary literature for this module
 #' 
@@ -54,6 +69,9 @@ theme_set(theme_bw(base_size = 14))
 #' ## EXERCISE 2.1: Compare designs — n=50M/50F vs n=100M
 #' 
 ## -----------------------------------------------------------------------------
+#| fig-alt:
+#|   - "Boxplot of simulated liver function in control and drug-treated mice. The group distributions overlap, while a red X marks each group mean."
+#|   - "Grouped bar chart comparing statistical power for drug and sex effects in a male-only design, a same-size two-sex design, and a larger two-sex design. A dashed line marks 80 percent power."
 # KEY MISCONCEPTION ADDRESSED: "Including both sexes doubles sample size"
 # Reality: N is SHARED between sexes in exploratory inclusion
 # (Gaskill et al. 2025: 80% of researchers held this misconception)
@@ -283,6 +301,7 @@ sprintf(paste0(
 #' The previous designs powered the *main effects* of treatment and sex. But the SABV question that usually matters is the **interaction**: does the drug work *differently* in males and females? Reynolds (2024, Ch. 19, citing Jones & Nachtsheim 2011) states the rule directly: in factorial designs, **statistical power is highest for main effects and lower for interactions** — coefficient power follows a hierarchy. The widely used rule of thumb is that detecting an interaction of a given magnitude needs roughly **four times** the sample size required to detect a main effect of the same magnitude. The simulation below makes this concrete.
 #' 
 ## -----------------------------------------------------------------------------
+#| fig-alt: "Line chart of statistical power against total sample size. The treatment main-effect line remains above the sex-by-treatment interaction line at every sample size."
 # Power to detect a true sex x treatment INTERACTION versus the treatment MAIN effect,
 # under the factorial model lm(outcome ~ treatment * sex).
 #
