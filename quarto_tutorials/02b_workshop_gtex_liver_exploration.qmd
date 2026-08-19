@@ -28,6 +28,23 @@ Script 02b: GTEx Liver Exploration — Sex as Biological Variable in Genomics
 
 Uses the GTEx liver subset prepared by tutorial 01 (`01_download_prepare_GTEx_liver`). The design-phase power simulations live in the companion tutorial `02a_workshop_simulation_exercises`.
 
+## Learning objectives
+
+By the end of this tutorial, you will be able to:
+
+1. assess whether one sex is consistently more variable in an RNA-seq dataset;
+2. fit and interpret a sex × age model;
+3. explain why pooling, separate subgroup analyses, and comparing subgroup p-values can mislead.
+
+Key terms used in this module:
+
+- **RNA-seq count:** the number of sequencing reads assigned to a gene.
+- **VST (variance-stabilizing transformation):** a transformation that makes the spread of low- and high-expression genes more comparable.
+- **FDR / Adjusted p-value (`padj`):** controls false positive rates when running thousands of simultaneous statistical tests.
+- **Main effect:** the average association of one variable with expression.
+- **Interaction:** occurs when the impact of one variable depends on the level of another.
+- **Confounding:** overlapping relationships between variables that obscure individual effects unless explicitly controlled in the model.
+
 ## Common analysis pitfalls and the factorial-model solution
 
 This tutorial demonstrates why pooling, disaggregation, and comparing p-values across subgroups are not valid substitutes for a factorial model (the **SIRF** framework: Karp et al. 2025, *Nature Communications*; the misconception percentages quoted throughout come from the barriers survey of Gaskill et al. 2025, *eLife*).
@@ -286,6 +303,8 @@ print(escape_results, row.names = FALSE)
 
 ## EXERCISE 3.3: Differential Expression with DESeq2 — sex as factor
 
+**DESeq2 in one sentence:** for each gene, DESeq2 models read counts while accounting for differences in sequencing depth, then tests whether expression differs between groups.
+
 ```{r}
 #| fig-width: 12
 #| fig-height: 6
@@ -402,6 +421,8 @@ The two panels show the same result two ways: the **volcano** emphasises statist
 ## EXERCISE 3.4: Factorial Model — sex × age interaction
 
 The factorial model `~ sex + condition + sex:condition` tests both main effects *and* their interaction in one fit. Here **condition = age group** (under 50 vs 50+). The model asks the question: does expression change with age, and does that change differ by sex?
+
+The interaction is the key SABV test. It compares the age-related change in females with the age-related change in males. It is not obtained by comparing two separate p-values.
 
 ```{r}
 # condition = age group (under 50 vs 50+); model: ~ sex + condition + sex:condition.
