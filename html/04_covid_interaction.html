@@ -3725,7 +3725,7 @@ p code, li code, td code {
 <p>In this example we’ll work with a plasma RNAseq dataset from hospitalized patients with or without COVID-19, taken from Overmyer et al., Cell Syst 2021. The data has been subsetted to simplify the tutorial, and the comparison will be between patients with severe COVID (put under mechanical ventilation) vs non-COVID patients.</p>
 <p>The dataset additionally includes patients of both sexes:</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>se <span class="ot">&lt;-</span> <span class="fu">readRDS</span>(<span class="st">"GSE157103_subset.SE.rds"</span>)</span>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>se <span class="ot">&lt;-</span> <span class="fu">readRDS</span>(<span class="fu">file.path</span>(<span class="st">".."</span>, <span class="st">"hands_on_datasets"</span>, <span class="st">"GSE157103_subset.SE.rds"</span>))</span>
 <span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">table</span>(se<span class="sc">$</span>disease, se<span class="sc">$</span>gender)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>          
@@ -4767,7 +4767,7 @@ loaded via a namespace (and not attached):
 <span id="cb73-44"><a href="#cb73-44" aria-hidden="true" tabindex="-1"></a>The dataset additionally includes patients of both sexes:</span>
 <span id="cb73-45"><a href="#cb73-45" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb73-46"><a href="#cb73-46" aria-hidden="true" tabindex="-1"></a><span class="in">```{r load}</span></span>
-<span id="cb73-47"><a href="#cb73-47" aria-hidden="true" tabindex="-1"></a>se <span class="ot">&lt;-</span> <span class="fu">readRDS</span>(<span class="st">"GSE157103_subset.SE.rds"</span>)</span>
+<span id="cb73-47"><a href="#cb73-47" aria-hidden="true" tabindex="-1"></a>se <span class="ot">&lt;-</span> <span class="fu">readRDS</span>(<span class="fu">file.path</span>(<span class="st">".."</span>, <span class="st">"hands_on_datasets"</span>, <span class="st">"GSE157103_subset.SE.rds"</span>))</span>
 <span id="cb73-48"><a href="#cb73-48" aria-hidden="true" tabindex="-1"></a><span class="fu">table</span>(se<span class="sc">$</span>disease, se<span class="sc">$</span>gender)</span>
 <span id="cb73-49"><a href="#cb73-49" aria-hidden="true" tabindex="-1"></a><span class="in">```</span></span>
 <span id="cb73-50"><a href="#cb73-50" aria-hidden="true" tabindex="-1"></a></span>
