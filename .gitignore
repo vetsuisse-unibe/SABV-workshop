@@ -25,6 +25,7 @@ quarto_tutorials/*
 !quarto_tutorials/02b_workshop_gtex_liver_exploration.qmd
 !quarto_tutorials/03a_gtex_multitissue_interaction.qmd
 !quarto_tutorials/03b_gtex_multitissue_interaction_fullset.qmd
+!quarto_tutorials/04_covid_interaction.qmd
 
 # Rendered HTML (self-contained), kept in html/ so tutorials can be read without running R
 !html/

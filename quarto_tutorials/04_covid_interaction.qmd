@@ -1,0 +1,281 @@
+---
+title: "Hands-on Exercise: Interaction analysis in a COVID dataset"
+subtitle: "EU-SABV Workshop"
+author: "Pierre-Luc Germain, ETH Zuerich, Switzerland"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    code-fold: false
+    code-tools: true
+    theme: cosmo
+    css: styles.css
+execute:
+  echo: true
+  warning: true
+  message: true
+  error: true
+  eval: true
+---
+
+## Setup
+
+```{r libs}
+suppressPackageStartupMessages({
+  library(SummarizedExperiment) # a basic bioconductor data structure
+  library(sechm) # wrapper to plot heatmaps from SummarizedExperiment objects
+  library(DESeq2) # Gene differential expression analysis
+  library(ggplot2) # plotting
+  library(stageR) # staged FDR analysis
+})
+```
+
+::: {.callout-note}
+## Differential analysis package
+To simplify the workshop, we use `DESeq2` to perform the differential analysis across all tutorials. We could have used equally adequate alternatives (e.g. `edgeR` or `limma::voom`), and while the exact commands and field names of the results differ, what we discuss here is equally applicable in any of these packages using (generalized) linear models.
+:::
+
+## Dataset
+
+In this example we'll work with a plasma RNAseq dataset from hospitalized patients with or without COVID-19, taken from Overmyer et al., Cell Syst 2021. The data has been subsetted to simplify the tutorial, and the comparison will be between patients with severe COVID (put under mechanical ventilation) vs non-COVID patients.
+
+The dataset additionally includes patients of both sexes:
+
+```{r load}
+se <- readRDS("GSE157103_subset.SE.rds")
+table(se$disease, se$gender)
+```
+
+We first get an overview of the dataset using PCA on variance-stabilized data:
+
+```{r pca}
+dds <- DESeqDataSet(se, ~gender*disease)
+DESeq2::plotPCA(object=vst(dds, blind=TRUE), intgroup=c("gender","disease")) + theme_bw()
+```
+
+The results show a clear separation according to disease status, and little global effect of the gender.
+This indicates that gender is not explaining the largest fractions of variation (among the most variable genes), but does not preclude an impact of gender on specific genes.
+
+## Simple differential expression analysis (DEA)
+
+Before getting in the sex differences in response, let's have a look at the differences between diseases.
+
+```{r dea}
+dds <- DESeq(dds)
+resultsNames(dds)
+res.disease <- results(dds, name="disease_COVID_vs_nonCOVID")
+res.disease <- res.disease[order(res.disease$pvalue),]
+head(res.disease)
+```
+
+We can view these differences as a volcano plot:
+
+```{r}
+res.disease$label <- row.names(res.disease)
+res.disease$significance <- ifelse(!is.na(res.disease$padj) & res.disease$padj<0.05,
+                                   ifelse(abs(res.disease$log2FoldChange)>1, "Significant & |LFC|>1", "Significant"),
+                                   "NS")
+ggplot(res.disease, aes(x = log2FoldChange, y = -log10(pvalue), color = significance)) +
+  geom_vline(xintercept=0, linetype="dashed") +
+  geom_point(alpha = 0.55, size = 1.3) +
+  ggrepel::geom_text_repel(data=head(res.disease,12), aes(label=label), color="black", size=3, max.overlaps=30) +
+  scale_color_manual(values = c("NS" = "grey70",
+                                "Significant" = "#FCA636",
+                                "Significant & |LFC|>1" = "#D73027")) +
+  coord_cartesian(xlim=c(-7,8)) + theme_bw() +
+  labs(title="COVID vs non-COVID", y="-log10(adjusted p-value)")
+
+```
+
+
+We can visualize the differential expression pattern across samples for the top genes:
+
+```{r diseaseHeatmap}
+# For ease of visualization, we'll put variance-stabilized, normalized data into
+# the SummarizedExperiment object
+assay(se, "vst") <- assay(DESeq2::vst(dds, blind=FALSE))
+# and then we'll also compute a per-sample log2FC to the nonCOVID of each gender:
+se <- log2FC(se, "vst", se$disease=="nonCOVID", by=se$gender)
+
+# we can the visualize the top 100 DEGs as a log2FC heatmap:
+sechm(se, head(row.names(res.disease), 100), gaps_at="disease", top_annotation="gender")
+```
+
+This shows very strong differences between COVID and non-COVID plasma RNAseq.
+
+One common misconception, here, and which is definitely not helped by the way DESeq2 names its results, is that the DEA results we are looking at (i.e. 'disease_COVID_vs_nonCOVID') represent the average, across males and females, of the difference between COVID and non-COVID patients. In fact, it does not: the results represent the difference between COVID and non-COVID patients *in females* (and we are simply lucky that, by and large, males and females respond very similarly).
+
+To illustrate this point, consider the IQSEC3 gene, which according to the DEA results :
+
+```{r IQSEC3}
+res.disease["IQSEC3",]
+```
+
+If we plot the expression of the gene across samples, we can observe that it is in fact down-regulated in female COVID patients (relative to female non-COVID), but not in males:
+
+```{r IQSEC3plot}
+ggplot(meltSE(se, "IQSEC3"), aes(gender, vst, fill=disease)) + geom_boxplot() +
+  theme_bw() + ylab("IQSEC3 expression (vst)")
+```
+
+The reason why the test, as done here, is specifically in females, is that what DESeq2 is doing here is testing whether, in the model `y~1+gender+disease+gender:disease` (i.e. the fully spelled out version of `y~gender*disease`), the `disease` coefficient is non-zero. However, in males, the effect of the disease is represented in the model as the combination of the effect it has in females (the first, hence baseline gender) *plus* the interaction (the `gender:disease` coefficient, obtained as the 'gendermale.diseaseCOVID' DESeq2 results).
+
+To test for average (across males and females) effects of the disease, we would have to use contrats (see below). But for the moment, let us return to the question we ultimately wish to address is: is the difference between COVID and non-COVID plasma RNA different in males and females?
+
+## Gender:Disease interaction
+
+Such a difference would be captured by the interaction term, i.e. the `gender:disease` coefficient of the model, which in the DESeq2 results is named 'gendermale.diseaseCOVID' :
+
+```{r interDEA}
+res.inter <- results(dds, name="gendermale.diseaseCOVID")
+res.inter <- res.inter[order(res.inter$pvalue),]
+head(res.inter)
+```
+
+We have a single gene passing FDR, but let's have a look at the top 10 candidates:
+
+```{r interHeatmap}
+sechm(se, head(row.names(res.inter), 10), gaps_at="disease", top_annotation="gender")
+```
+
+It does look like there might be some differences: the PDZD2 gene appears to be upregulated (in COVID vs non-COVID) only in males, whereas the CLVS1 gene appears upregulated only in females. However, they do not pass genome-wide significant; only TBC1D3F does, and it is not convincing at all:
+
+```{r TBC1D3F}
+ggplot(meltSE(se, "TBC1D3F"), aes(gender, vst, fill=disease)) + geom_boxplot() + theme_bw() + ylab("TBC1D3F expression (vst)")
+```
+
+
+::: {.callout-note}
+## Why was TBC1D3F called in the first place?
+Model fitting is challenging in the presence of outliers or when a group has all zero counts, as is the case for this gene. Here `edgeR`'s quasi-likelihood approach would most likely yield a better calibrated estimate of significance for this genes.
+:::
+
+
+Does the lack of significance mean that males and females respond the same? Clearly we can't conclude that: *absence of evidence is not evidence of absence*. It could simply be that we do not have the power to detect such differences, although the fact that we do detect massive differences between disease states does indicate that disease-sex interactions, if there are any, are relatively mild.
+
+
+### Staged FDR analysis
+
+Statistically speaking, testing for an interaction is more difficult than testing for main effects.
+Fortunately, there is a strategy that can help us increase power.
+
+In a normal ANOVA, one starts by asking the more generic questions, and conditional on the significance of the higher-order variables, one then asks more fine-grained questions. In contrast, when running our DEA we are testing every hypothesis for every gene, even when it doesn't make sense to test something very specific.
+
+The `stageR` package has been designed to do an analog of this hierarchical approach, working at the FDR level. Simplified, what it does is test for interaction only in a subset of the genes which, based on a more general test (called 'screening'), is more likely to show an interaction.
+
+For this, we first need the screening test, which will be the test of whether any of the coefficient is non-zero (in other words, whether the full model, `~gender*disease`, explains the data significantly better than a null model `~1`).
+
+```{r stageRscreen}
+dds.lrt <- DESeq(dds, test = "LRT", reduced = ~ 1)
+res.any <- results(dds.lrt)
+res.any <- res.any[!is.na(res.any$padj),]
+
+screening.padj <- res.any$padj
+confirm.pvalue <- res.inter[row.names(res.any), "pvalue"]
+```
+
+Now that we have the results of both the screening test and our interaction (so-called 'confirmation') test, we can run stageR:
+
+```{r stageR}
+staged <- stageR(pScreen=screening.padj, pConfirmation=cbind(interaction=confirm.pvalue), pScreenAdjusted = TRUE)
+staged <- stageWiseAdjustment(staged, method="none", alpha=0.05)
+stage.padj <- getAdjustedPValues(staged, onlySignificantGenes=FALSE, order=FALSE)
+row.names(stage.padj) <- row.names(res.any)
+
+# we put the stage-adjusted pvalues in the original DEA object:
+res.inter$stage.padj <- as.data.frame(stage.padj)[row.names(res.inter), "interaction"]
+res.inter <- res.inter[order(res.inter$stage.padj),]
+head(res.inter)
+
+sum(res.inter$stage.padj<0.05, na.rm=TRUE)
+```
+
+In this way, we've identified 162 genes with a significant gender:disease interaction:
+
+```{r interHeatmap2}
+interDEGs <- row.names(res.inter)[which(res.inter$stage.padj<0.05)]
+sechm(se, interDEGs, gaps_at="disease", top_annotation="gender")
+```
+
+One could then go on to characterize these genes, for instance through geneset enrichment analysis.
+
+## An alternative approach using contrasts
+
+As an alternative testing framework (also available in DESeq2, as well as alternatives such as edgeR and limma/voom), one can use contrasts. Contrasts allow us to formulate differences between groups, corrected for the other factors included in the model. To do this, it is easier to first flatten the groups so that they are represented in a single variable:
+
+```{r flattenedGroup}
+se$group <- paste(se$gender, se$disease, sep=".")
+table(se$group)
+```
+
+Then, we formulate our model without an intercept:
+
+```{r noInterceptModel}
+dds <- DESeqDataSet(se, ~0+group)
+dds <- DESeq(dds)
+```
+
+Finally, we express the comparisons of interest (contrasts):
+
+```{r contrasts}
+my.contrasts <- limma::makeContrasts(
+  femaleDisease=female.COVID-female.nonCOVID, # effects of COVID in females --> the equivalent of the earlier 'disease_COVID_vs_nonCOVID' test
+  maleDisease=male.COVID-male.nonCOVID, # effects of COVID in males
+  meanDisease=(female.COVID+male.COVID)/2-(female.nonCOVID+male.nonCOVID)/2, # average effect of COVID across genders
+  interaction=(male.COVID-male.nonCOVID)-(female.COVID-female.nonCOVID), # interaction --> the equivalent of the earlier 'gendermale.diseaseCOVID' test
+  levels=gsub("^group","", resultsNames(dds))
+)
+
+# Then we can test a specific contrast, e.g. again the interaction:
+res.inter2 <- results(dds, contrast = my.contrasts[,"interaction"])
+res.inter2 <- res.inter2[order(res.inter2$pvalue),]
+
+# and we can see that the results are virtually identical with our previous analysis:
+head(res.inter2)
+```
+
+## Beyond single-gene hypotheses
+
+### Global differences in magnitude
+
+The results of the interaction analysis above, and especially the heatmap visualization, suggest no qualitative difference between the disease signature in the two genders, but rather a difference in degree. Specifically, *in those genes* the response appears stronger in males. Since we are looking only at significant interactions, however, it is not clear how these patterns extend to other response genes. This prompt the question of whether there is a *global* trend of a difference in the *magnitude* of the response between genders.
+
+Testing such a hypothesis is considerably easier (from a power point of view) than testing gene-specific interactions. All we need to do is test whether the slope comparing the disease logFC in each group differs from the diagonal (i.e. slope=1).
+
+As we saw in the theoretical part, however, the crucial thing is the selection of the genes. To avoid the regression to the mean bias, the selection needs to be unbiased between males and females.
+
+We therefore take the results of the contrast that looks for disease differences averaged across genders:
+
+```{r}
+names(conts) <- conts <- colnames(my.contrasts)
+resl <- lapply(conts, \(x) results(dds, contrast = my.contrasts[,x]))
+d <- data.frame(row.names=row.names(resl[[1]]),
+                logFC.males=resl$maleDisease$log2FoldChange,
+                logFC.females=resl$femaleDisease$log2FoldChange,
+                padj.mean=resl$meanDisease$padj)
+d <- d[which(d$padj.mean<0.05),]
+ggplot(d, aes(logFC.females, logFC.males)) + geom_abline(slope=1) +
+  ggpointdensity::geom_pointdensity(size=1) + coord_cartesian(xlim=c(-6.5,8), ylim=c(-7.5,9)) +
+  theme_bw() + geom_smooth(formula=y~0+x, method="lm")
+```
+
+::: {.callout-note}
+## Fitting a model on logFC scatterplots
+Note that, when the number of points (i.e. DEGs) is small, fits such as the one plotted here on the scatterplot can easily be mislead by outliers. When this is the case, a more accurate fit can be achived through robust linear models (see `MASS::rlm`). However, statistical testing with such models is more challenging. For the purpose of illustration, and as we do not have such a problem here, we stick to using a standard linear model.
+:::
+
+For the purpose of making a statistical test, we can simplify this as asking whether the average difference differs from zero:
+
+```{r}
+summary(lm(logFC.males - logFC.females ~ 0 + logFC.females, data = d))
+```
+
+Males do, globally, respond (roughly 10%) more strongly.
+
+## Session info
+
+```{r}
+sessionInfo()
+```

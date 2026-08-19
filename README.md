@@ -12,4 +12,5 @@ August 24–25 2026.
 | 2b · GTEx liver SABV exploration | [`02b_workshop_gtex_liver_exploration.html`](html/02b_workshop_gtex_liver_exploration.html) |
 | 3a · GTEx multi-tissue sex × tissue interaction (balanced) | [`03a_gtex_multitissue_interaction.html`](html/03a_gtex_multitissue_interaction.html) |
 | 3b · Same, full sex-imbalanced set (imbalance demo) | [`03b_gtex_multitissue_interaction_fullset.html`](html/03b_gtex_multitissue_interaction_fullset.html) |
+| 04 · Disease × sex interaction (COVID dataset) | [`04_covid_interaction.html`](html/04_covid_interaction.html) |
 
