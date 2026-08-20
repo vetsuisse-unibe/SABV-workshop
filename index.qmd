@@ -7,12 +7,18 @@ format:
     css: quarto_tutorials/styles.css
     toc: false
     number-sections: false
+    page-layout: full
     embed-resources: true
 ---
 
-Tutorials and prepared datasets for the **Sex As a Biological Variable (SABV)** workshop. Each tutorial is a self-contained page you can read here and run yourself in RStudio.
+```{=html}
+<style>
+/* Landing table: keep each row's content on a single line in both columns. */
+table th, table td { white-space: nowrap; }
+</style>
+```
 
-**Recommended order:** [02a](html/02a_workshop_simulation_exercises.html) → [02b](html/02b_workshop_gtex_liver_exploration.html) → [03a](html/03a_gtex_multitissue_interaction.html) → [04](html/04_covid_interaction.html). **03b** is an optional extension. *(01 prepares the data, which already ships with the repo.)*
+Tutorials and prepared datasets for the **Sex As a Biological Variable (SABV)** workshop. Each tutorial is a self-contained page you can read here and run yourself in RStudio.
 
 | Exercise | What it covers |
 |---|---|
