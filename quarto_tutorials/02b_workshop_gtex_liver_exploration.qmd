@@ -26,7 +26,7 @@ execute:
 
 Script 02b: GTEx Liver Exploration — Sex as Biological Variable in Genomics
 
-Uses the GTEx liver subset prepared by tutorial 01 (`01_download_prepare_GTEx_liver`). The design-phase power simulations live in the companion tutorial `02a_workshop_simulation_exercises`.
+Uses the GTEx liver subset prepared by tutorial 01 (`01_download_prepare_GTEx_liver`).
 
 ## Learning objectives
 
@@ -179,7 +179,7 @@ plotPCA(vsd, intgroup = "sex")
 Samples do **not** split cleanly by sex — as expected, since sex-linked genes are only a small fraction of the transcriptome. One thing still worth checking is whether **age is confounded with sex** in this subset. The optional block below redraws the PCA with custom styling and colours the points by age, for anyone who wants a publication-style figure.
 
 ::: {.callout-note collapse="true"}
-## Optional: a nicer-looking PCA (and the age-confounding check)
+## Optional: a custom PCA plot and an age-confounding check
 
 ```{r}
 pca_data <- plotPCA(vsd, intgroup = c("sex"), returnData = TRUE)
@@ -270,7 +270,7 @@ print(p_sex_chr)
 
 These nine genes show the three textbook classes of sex-chromosome expression: **XIST** is female-specific (the X-inactivation switch, off in males); the **Y-linked genes** (DDX3Y, EIF1AY, KDM5D, RPS4Y1, UTY) are male-specific; and the **X-escape genes** (DDX3X, KDM5C, KDM6A) are modestly higher in females, which express them from both X chromosomes. These are dosage-driven differences seen in essentially every tissue, so they serve as **positive controls** — XIST up in females and Y-genes up in males confirm the sex labels and pipeline are correct. (The Y-genes aren't quite zero in females: a low signal from reads cross-mapping between the Y genes and their near-identical X paralogs — a common real-data artifact.)
 
-### Quantifying X-inactivation escape
+### Quantifying Expression of X Chromosome Genes in Females and Males
 
 The X-escape genes are expressed from *both* X chromosomes in females, so they run higher in females (typically 1.5–2×). We can put a number on it — and screen a wider panel of known escapees — with the female/male expression ratio. These are genuine biological sex differences, not technical artifacts.
 
@@ -466,9 +466,9 @@ res_int_df <- as.data.frame(res_interaction) %>%
 print(head(res_int_df[, c("gene_name", "log2FoldChange", "padj")], 10))
 
 # --- Real sex × age interaction plots: three GTEx liver genes ---
-# Genes taken from the top of res_int_df (ranked by the interaction term). These are
-# illustrative, SELECTION-DEPENDENT examples (see the caveats below the chunk), not
-# independent confirmation. All three are FDR-significant for sexFemale.conditionOlder.
+# Example genes from the top of res_int_df (ranked by interaction). Illustrative and
+# selection-dependent, not independent confirmation (see caveats below the chunk).
+# All three are FDR-significant for sexFemale.conditionOlder.
 panel_genes <- c("IGKJ5", "SKI", "DACT2")
 panel_ids   <- genes_final$gene_id[match(panel_genes, genes_final$gene_name)]
 
@@ -525,7 +525,7 @@ A student fits `~ sex * condition`, reads the `conditionOlder` coefficient as "t
 :::
 
 ```{r}
-# Self-contained example gene (KL, Klotho) as a continuous outcome.
+# example gene (KL, Klotho)
 kl_idx <- which(genes_final$gene_name == "KL")
 age_grp <- factor(
   ifelse(as.numeric(sub("-.*", "", workshop_meta$age_decade)) >= 50, "Older", "Younger"),
@@ -561,7 +561,9 @@ sprintf("Contrasts | age-in-F=%.3f  age-in-M=%.3f  AVERAGE age=%.3f  interaction
         F_age, M_age, avg_age, interaction)
 ```
 
-**The point.** The `conditionOlder` coefficient is **not** the overall age effect — it is the age effect *in the baseline sex*, which is exactly why swapping the reference changes it. Nothing is broken; the coefficient just doesn't mean what the student thought. The no-intercept model `~ 0 + group` plus explicit contrasts lets you ask for *exactly* the comparison you want — age in females, in males, the true **average**, or the **interaction** — with no baseline ambiguity.
+**The takeaway.** Don't mistake the `conditionOlder` coefficient for an overall age effect; it's strictly the effect of aging within whichever sex is set as the baseline. This explains why flipping the reference from females (−1.046) to males (−0.274) alters the coefficient without changing the underlying math.
+
+A cleaner strategy is fitting a cell-means model without an intercept (`expression ~ 0 + group`). This directly estimates the average expression level for every sex × age group. Instead of navigating baseline reference levels, you simply subtract group means to extract whichever specific effect or interaction you want.
 
 ```{r}
 # Visualize the four cell means as an interaction plot with SEM error bars
