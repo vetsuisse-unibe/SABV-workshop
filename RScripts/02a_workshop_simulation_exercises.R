@@ -298,50 +298,65 @@ sprintf(paste0(
 #' 
 #' ## EXERCISE 2.1b: The interaction costs more power than a main effect
 #' 
-#' The previous designs powered the *main effects* of treatment and sex. But the SABV question that usually matters is the **interaction**: does the drug work *differently* in males and females? Reynolds (2024, Ch. 19, citing Jones & Nachtsheim 2011) states the rule directly: in factorial designs, **statistical power is highest for main effects and lower for interactions** — coefficient power follows a hierarchy. The widely used rule of thumb is that detecting an interaction of a given magnitude needs roughly **four times** the sample size required to detect a main effect of the same magnitude. The simulation below makes this concrete.
+#' In Exercise 2.1, Designs A–C powered the *main effects* — the overall treatment effect and baseline sex differences. However, the SABV question that usually matters most is the **interaction**: does the drug work *differently* in males and females? As highlighted by Reynolds (2024, Ch. 19, citing Jones & Nachtsheim 2011), statistical power in factorial designs is highest for main effects and substantially lower for interactions. As a rule of thumb, detecting an interaction of a given magnitude requires roughly **four times** the total sample size needed to detect a main effect of that same magnitude.
+#' 
+#' A common point of confusion is that these two questions measure fundamentally different quantities. Suppose a drug's true effect size is **+0.25 SD in males** and **+0.75 SD in females**:
+#' 
+#' - **Main effect (the average):** (0.25 + 0.75) / 2 = **0.50**. Answers: *"Does the treatment work on average across both sexes?"*
+#' - **Interaction (the gap):** 0.75 − 0.25 = **0.50**. Answers: *"Does the treatment response differ by sex?"*
+#' 
+#' Both equal 0.50 in this simulation on purpose, so we can compare their statistical power at the exact same effect-size magnitude (0.5 SD). We evaluate each question using standard **0/1 (dummy) coding**:
+#' 
+#' 1. **Main effect ($Q_1$):** fit the additive model `lm(y ~ treatment + sex)` and test `treatment`. Because there is no interaction term in this model, R estimates a single treatment effect averaged across sexes.
+#' 2. **Interaction ($Q_2$):** fit the full model `lm(y ~ treatment * sex)` and test the `treatment:sex` coefficient, which directly isolates the male–female response gap.
 #' 
 ## -----------------------------------------------------------------------------
 #| fig-alt: "Line chart of statistical power against total sample size. The treatment main-effect line remains above the sex-by-treatment interaction line at every sample size."
-# Power to detect a true sex x treatment INTERACTION versus the treatment MAIN effect,
-# under the factorial model lm(outcome ~ treatment * sex).
-#
-# Two design choices keep the comparison fair:
-#   1. We set the true AVERAGE treatment effect and the true interaction to the same
-#      magnitude (0.5 SD), so any power gap is the interaction penalty, not a size gap.
-#   2. We EFFECT-code treatment and sex as -0.5/+0.5 (not 0/1). With 0/1 dummy coding the
-#      `treatment` coefficient would be the treatment effect in the *reference sex only*
-#      (a simple effect), not the average main effect -- the exact baseline-coding trap
-#      shown in the next tutorial (02b, Exercise 3.5). Effect coding makes the
-#      `treatment` coefficient the genuine average main effect.
-simulate_interaction_power <- function(n_per_cell, main_effect = 0.5, interaction_effect = 0.5,
-                                       n_sims = 1000) {
-  detect_main <- logical(n_sims); detect_int <- logical(n_sims)
-  # The interaction is the gap between the female and male treatment effects. Split it
-  # symmetrically around the average so the average treatment effect stays = main_effect.
-  male_effect   <- main_effect - interaction_effect / 2
-  female_effect <- main_effect + interaction_effect / 2
-  for (i in 1:n_sims) {
-    sex       <- rep(c(-0.5, 0.5), each = 2 * n_per_cell)      # -0.5 = M, +0.5 = F
-    treatment <- rep(rep(c(-0.5, 0.5), each = n_per_cell), 2)  # -0.5 = control, +0.5 = treated
-    # Each treated animal gets its sex-specific treatment effect; controls get 0. Plus noise.
-    treat_effect <- ifelse(sex < 0, male_effect, female_effect)
-    outcome <- (treatment > 0) * treat_effect + rnorm(length(sex), 0, 1)
-    co <- summary(lm(outcome ~ treatment * sex))$coefficients[, 4]
-    detect_main[i] <- co["treatment"] < 0.05        # average treatment (main) effect
-    detect_int[i]  <- co["treatment:sex"] < 0.05    # sex x treatment interaction
-  }
-  c(treatment = mean(detect_main), interaction = mean(detect_int))
+# The two sex-specific drug effects that everything below is built from:
+effect_male   <- 0.25   # drug effect in males
+effect_female <- 0.75   # drug effect in females
+
+# Main effect = the AVERAGE of the two ; Interaction = the DIFFERENCE (gap) between them.
+cat(sprintf("Main effect (average) = %.2f  |  Interaction (difference) = %.2f\n",
+            (effect_male + effect_female) / 2, effect_female - effect_male))
+
+# We compare power for the main effect and the interaction at the SAME size (0.5 SD),
+# each asked with the model that matches the question -- all in 0/1 dummy coding.
+# We never read a "main effect" out of a model that also contains an interaction term,
+# so there is no reference-coding pitfall (contrast Exercise 3.5 in the next tutorial).
+
+# Q1: does the treatment work ON AVERAGE?  -> additive model, test `treatment`.
+power_main_effect <- function(n_per_cell, n_sims = 1000) {
+  avg_effect <- (effect_male + effect_female) / 2      # 0.50 -- the average effect
+  mean(replicate(n_sims, {
+    sex       <- rep(c(0, 1), each = 2 * n_per_cell)     # 0 = Male, 1 = Female
+    treatment <- rep(rep(c(0, 1), each = n_per_cell), 2) # 0 = Control, 1 = Treated
+    outcome   <- treatment * avg_effect + rnorm(4 * n_per_cell)  # SAME effect in both sexes
+    summary(lm(outcome ~ treatment + sex))$coefficients["treatment", "Pr(>|t|)"] < 0.05
+  }))
+}
+
+# Q2: does the treatment effect DIFFER by sex?  -> interaction model, test `treatment:sex`.
+power_interaction <- function(n_per_cell, n_sims = 1000) {
+  mean(replicate(n_sims, {
+    sex       <- rep(c(0, 1), each = 2 * n_per_cell)     # 0 = Male, 1 = Female
+    treatment <- rep(rep(c(0, 1), each = n_per_cell), 2) # 0 = Control, 1 = Treated
+    # If treated & male -> 0.25 | if treated & female -> 0.75
+    trt_effect <- ifelse(sex == 0, effect_male, effect_female)
+    outcome    <- treatment * trt_effect + rnorm(4 * n_per_cell)
+    summary(lm(outcome ~ treatment * sex))$coefficients["treatment:sex", "Pr(>|t|)"] < 0.05
+  }))
 }
 
 set.seed(42)
-int_grid <- data.frame(n_per_cell = c(25, 50, 100, 200))
-int_power <- t(sapply(int_grid$n_per_cell, simulate_interaction_power))
-int_tab <- cbind(int_grid, as.data.frame(int_power * 100))
+int_tab <- data.frame(n_per_cell = c(25, 50, 100, 200))
+int_tab$total_N     <- int_tab$n_per_cell * 4
+int_tab$treatment   <- sapply(int_tab$n_per_cell, power_main_effect) * 100
+int_tab$interaction <- sapply(int_tab$n_per_cell, power_interaction) * 100
 print(int_tab)
 
-# Interaction plot of power: two lines (effect type) across total N.
+# Two power curves across total N.
 int_long <- int_tab %>%
-  mutate(total_N = n_per_cell * 4) %>%
   pivot_longer(c(treatment, interaction), names_to = "Effect", values_to = "Power")
 
 p_int_power <- ggplot(int_long, aes(x = total_N, y = Power, color = Effect, group = Effect)) +
@@ -359,9 +374,11 @@ p_int_power <- ggplot(int_long, aes(x = total_N, y = Power, color = Effect, grou
 print(p_int_power)
 
 #' 
-#' The interaction line sits well below the main-effect line at every sample size: a design that is comfortably powered to *detect* a drug effect can be badly **underpowered to test whether that effect differs by sex**. This is the quantitative reason a single exploratory cohort can legitimately *screen* for sex differences but usually cannot *confirm* them — the confirmatory interaction study must be sized for the interaction, not the main effect.
+#' As shown in the plot, the interaction curve sits well below the main-effect curve at every sample size. A cohort size that achieves >90% power to detect an overall drug effect (`total_N = 200`) yields only ~40% power to confirm whether that effect varies by sex.
 #' 
-#' One caveat on how to read this. The ~4× gap assumes we care about an interaction of the *same magnitude* as the main effect — a deliberately hard, worst-case comparison. The interactions that matter most for **generalisability** are often much larger: a treatment that works in one sex but is flat in the other, or acts in opposite directions. Those are easier to detect than this equal-magnitude case. So treat the 4× rule as a *floor* on the effort an interaction test needs, not a fixed multiplier — and note that it is scenario-dependent, tied to the effect size you decide is worth detecting.
+#' **Practical implication:** a single exploratory experiment can *screen* for sex differences, but *confirming* an interaction requires a study explicitly powered for the interaction term — not just the main effect.
+#' 
+#' **A note on context.** The 4× sample-size rule represents an equal-magnitude comparison (0.5 SD vs 0.5 SD). In biological translation, the interactions that matter most are often larger — such as a drug working strongly in one sex but showing zero effect (or an opposite effect) in the other. Qualitative interactions like these are easier to detect, so treat the 4× benchmark as an *upper bound* on sample-size requirements rather than a fixed rule.
 #' 
 #' ::: {.callout-tip}
 #' ## Where to go next
