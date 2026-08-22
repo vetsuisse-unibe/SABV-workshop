@@ -272,8 +272,6 @@ These nine genes show the three textbook classes of sex-chromosome expression: *
 
 ### Quantifying Expression of X Chromosome Genes in Females and Males
 
-The X-escape genes are expressed from *both* X chromosomes in females, so they run higher in females (typically 1.5–2×). We can put a number on it — and screen a wider panel of known escapees — with the female/male expression ratio. These are genuine biological sex differences, not technical artifacts.
-
 ```{r}
 escape_gene_list <- c("KDM6A", "DDX3X", "KDM5C", "XIST",
                        "EIF1AX", "ZFX", "USP9X", "SMC1A")
